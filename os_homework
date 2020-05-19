@@ -1,0 +1,232 @@
+#include<iostream>
+#include<time.h>
+#include<math.h>
+#include<cstdlib>
+#include<vector>
+#include<thread>
+#include<mutex>
+using namespace std;
+
+
+
+
+
+
+typedef struct HashData {						//해쉬의 데이터내용과 같은 해쉬값을 가지는 다음 데이터 주소
+	string str;
+	struct HashData* next;
+}HashData;
+
+typedef struct HashHead {
+	int leftstrings;
+	int doubled;
+	vector<int> Hashcount;								// 각 해쉬값에 대한 갯수
+	struct HashData** HashValue;					// 각 해쉬값에 대한 데이터 저장 주소
+
+
+}HashHead;
+
+void addData(HashHead* Head, string str, int  hashkey)//중복이면 추가 X
+{
+	
+
+	HashData* temp = new HashData;					//입력단어 노드생성
+	temp->str = str;
+	temp->next = NULL;
+	
+	HashData* beforecurr = NULL;					//이전 노드 위치
+	HashData* curr = Head->HashValue[hashkey];		//현재 노드
+	
+	
+
+	if (Head->leftstrings == 0)
+		return;
+
+	while (true)
+	{
+		if (curr != NULL)
+		{
+			//cout << endl << "curr가 널값이 아님" << endl;
+			if (curr->str == temp->str)
+			{
+				//cout << "같아서 넣지 않음";
+				Head->doubled++;
+				break;
+			}
+			else
+			{
+				//cout << endl << "curr가 temp와 다른 단어를 가짐" << endl;
+				if (curr->next != NULL)						//다음것이 있고 중복 x일때 다음 탐색
+				{
+					beforecurr = curr;
+					curr = curr->next;
+				}
+				else										//다음이 없고 중복도 없을때 추가
+				{
+
+					//cout << "마지막이니 추가해야해" << endl;
+				
+					curr->next = temp;
+					
+				
+					Head->leftstrings--;
+					Head->Hashcount[hashkey]++;
+					break;
+				}
+
+			}
+
+		}
+		else												//이게 지금 처음이라 처음 추가
+		{
+			//cout << endl << "처음" << endl;
+
+			Head->HashValue[hashkey] = temp;
+			Head->Hashcount[hashkey]++;
+			Head->leftstrings--;
+			temp->next = curr;
+			break;
+		}
+
+
+
+	}
+	
+
+
+}
+
+
+
+HashHead* CreateHead(HashHead *Head, int count)    //해쉬 헤드 노드 생성
+{
+
+	int hashvolumelist[12] = { 13,29,53,97,193,389,769,1543,3079,6151,12289,24593 }; //입력 데이터에 따른 해쉬 테이블 크기 설정
+
+	int num = (int)(log(count) / log(2)) - 3;
+
+	//cout << num << endl << hashvolumelist[num];
+
+	Head->Hashcount.resize(hashvolumelist[num]);
+	Head->HashValue = new HashData*[hashvolumelist[num]]();//해시 테이블의 크기 조정
+	Head->doubled = 0;
+	Head->leftstrings = count;
+
+
+	return Head;
+}
+
+
+
+
+void printHash(HashHead* Head) //출력함수
+{
+	HashData* curr;
+	for (int i = 0; i < Head->Hashcount.size(); i++)   //해시 테이블 단어들 출력
+	{
+		cout << "["<<i<<"] -> ";
+		curr = Head->HashValue[i];
+		
+		while (curr != NULL)
+		{
+			cout << curr->str << " -> ";
+			curr = curr->next;
+		}
+		cout << endl;
+	}
+	int count = 0;
+	for (int i = 0; i < Head->Hashcount.size(); i++)
+	{
+		cout.width(6);
+		cout.fill(' ');
+		cout << i << " : " << Head->Hashcount[i]<<" ";
+		count++;
+		if(count==20)
+		{
+			count = 0; 
+			cout << endl;
+		}
+		
+	}
+
+	cout<<endl << Head->doubled << "개 중복" << endl; //몇개가 중복되었는지 확인
+
+}
+
+void Function(HashHead* Head, int count, mutex& m) { //스레드 생성 뒤 실행 내용
+	srand(time(NULL));
+
+	while(true)
+	{
+		int strlen = rand() % 15 + 1;
+		int temp = 0;
+		string str;
+		str.resize(strlen);
+		
+		m.lock();				//경쟁 조건을위해서 실행
+		
+		for (int i = 0; i < strlen; i++)
+		{
+			str[i] = rand() % 26 + 97;
+			temp += str[i];
+		}
+
+
+		//해쉬 값 생성 식
+		temp = (((double)temp+ (double)str.size()) / (double)1900)
+				* (int)Head->Hashcount.size()+ (((int)str[0]-109) *2);
+		
+		
+	
+		addData(Head, str, temp);
+
+		
+		if (Head->leftstrings == 0) //목표된 글자수에 도달하면 종료
+		{
+			m.unlock();
+			break;
+		}
+		m.unlock(); // 글자수가 채워지지 않았을 경우 계속
+	}
+
+}
+
+
+int main()
+{
+	int count;	  //단어 갯수 저장
+	mutex m;      //공유 메모리에 대한 경쟁 조건에 이용하는 함수
+	
+	
+	
+	cout << "스트링의 개수(1000개 이상) : ";
+	cin >> count;
+	cout << endl;
+	HashHead* Head = new HashHead;
+
+	Head->HashValue = NULL;
+
+	
+	
+	CreateHead(Head, count); //헤드 해쉬노드 생성
+
+
+
+	thread t1(Function,Head ,count, ref(m)); //스레드 4개 생성
+	thread t2(Function, Head, count, ref(m));
+	thread t3(Function, Head, count, ref(m));
+	thread t4(Function, Head, count, ref(m));
+
+
+
+	t1.join(); //스레드 4개 종료될때 까지 대기
+	t2.join();
+	t3.join();
+	t4.join();
+
+
+	printHash(Head);
+
+
+
+}
